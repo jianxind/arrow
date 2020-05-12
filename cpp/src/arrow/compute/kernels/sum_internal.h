@@ -27,6 +27,7 @@
 #include "arrow/type_traits.h"
 #include "arrow/util/bit_util.h"
 #include "arrow/util/logging.h"
+#include "arrow/util/simd.h"
 
 namespace arrow {
 
@@ -96,16 +97,80 @@ class SumAggregateFunction final : public AggregateFunctionStaticState<StateType
   std::shared_ptr<DataType> out_type() const override { return StateType::out_type(); }
 
  private:
-  StateType ConsumeDense(const ArrayType& array) const {
+  template <typename T>
+  inline int BatchSize() const {
+    return 8;  // Always 8 for scalar
+  }
+
+  template <typename T>
+  // Scalar version for dense batch
+  inline StateType SumDenseBatch(const T* values, int64_t num_batch) const {
+    const auto kBatchSize = BatchSize<T>();
     StateType local;
 
-    const auto values = array.raw_values();
-    const int64_t length = array.length();
-    for (int64_t i = 0; i < length; i++) {
-      local.sum += values[i];
+    for (auto idx_batch = 0; idx_batch < num_batch; idx_batch++) {
+      for (auto i = 0; i < kBatchSize; i++) {
+        local.sum += values[kBatchSize * idx_batch + i];
+      }
     }
 
-    local.count = length;
+    local.count = num_batch * kBatchSize;
+
+    return local;
+  }
+
+  template <typename T>
+  // Scalar version for sparse batch
+  inline StateType SumSparseBatch(const uint8_t* bitmap, const T* values,
+                                  int64_t num_batch) const {
+    const auto kBatchSize = BatchSize<T>();
+    const auto kBatchByteSize = kBatchSize / 8;
+    StateType local;
+
+    for (auto idx_batch = 0; idx_batch < num_batch; idx_batch++) {
+      for (auto i = 0; i < kBatchByteSize; i++) {
+        auto idx_bitmap = idx_batch * kBatchByteSize + i;
+        local += UnrolledSum(bitmap[idx_bitmap], &values[idx_bitmap * 8]);
+      }
+    }
+
+    return local;
+  }
+
+  // Handle the sparse as byte sequence
+  inline StateType SumSparseBytes(const uint8_t* bitmap, const CType* values,
+                                  int64_t num_byte) const {
+    const auto kBatchSize = BatchSize<CType>();
+    const auto kBatchByteSize = kBatchSize / 8;
+    const auto num_batch = num_byte / kBatchByteSize;
+    const auto num_suffix_byte = num_byte % kBatchByteSize;
+    StateType local;
+
+    local += SumSparseBatch(bitmap, values, num_batch);
+
+    auto start_idx_suffix = num_batch * kBatchByteSize;
+    for (auto i = 0; i < num_suffix_byte; i++) {
+      local +=
+          UnrolledSum(bitmap[start_idx_suffix + i], &values[(start_idx_suffix + i) * 8]);
+    }
+
+    return local;
+  }
+
+  StateType ConsumeDense(const ArrayType& array) const {
+    const auto kBatchSize = BatchSize<CType>();
+    const auto values = array.raw_values();
+    const int64_t length = array.length();
+    StateType local;
+    const auto num_batch = length / kBatchSize;
+    const auto num_suffix = length % kBatchSize;
+
+    local += SumDenseBatch(values, num_batch);
+
+    for (auto i = 0; i < num_suffix; i++) {
+      local.sum += values[kBatchSize * num_batch + i];
+    }
+    local.count += num_suffix;
 
     return local;
   }
@@ -190,9 +255,7 @@ class SumAggregateFunction final : public AggregateFunctionStaticState<StateType
 
     // Consume the (full) middle bytes. The loop iterates in unit of
     // batches of 8 values and 1 byte of bitmap.
-    for (int64_t i = 1; i < covering_bytes - 1; i++) {
-      local += UnrolledSum(bitmap[i], &values[i * 8]);
-    }
+    local += SumSparseBytes(&bitmap[1], &values[8], covering_bytes - 2);
 
     // Consume the last (potentially partial) byte.
     const int64_t last_idx = covering_bytes - 1;
