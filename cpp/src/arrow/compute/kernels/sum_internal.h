@@ -99,7 +99,11 @@ class SumAggregateFunction final : public AggregateFunctionStaticState<StateType
  private:
   template <typename T>
   inline int BatchSize() const {
+#if defined(ARROW_HAVE_AVX512)
+    return 8;  // 8 epi64/double(accumulator type) for one m512 block
+#else
     return 8;  // Always 8 for scalar
+#endif
   }
 
   template <typename T>
@@ -136,6 +140,169 @@ class SumAggregateFunction final : public AggregateFunctionStaticState<StateType
 
     return local;
   }
+
+#if defined(ARROW_HAVE_AVX512)
+
+// Dense helper for accumulator type is same to data type
+#define BATCH_FUNC_DENSE_DIRECT(Type, SimdSetFn, SimdLoadFn, SimdAddFn)         \
+  inline StateType SumDenseBatch(const Type* values, int64_t num_batch) const { \
+    StateType local;                                                            \
+    const auto kBatchSize = BatchSize<Type>();                                  \
+                                                                                \
+    auto result_simd = SimdSetFn(0);                                            \
+    /* Directly aggregate the results with vectorize way */                     \
+    for (auto i = 0; i < num_batch; i++) {                                      \
+      auto src_simd = SimdLoadFn(&values[i * kBatchSize]);                      \
+      result_simd = SimdAddFn(src_simd, result_simd);                           \
+    }                                                                           \
+                                                                                \
+    /* Aggregate the final result on the vectorize results */                   \
+    auto result_scalar = reinterpret_cast<Type*>(&result_simd);                 \
+    for (auto i = 0; i < kBatchSize; i++) {                                     \
+      local.sum += result_scalar[i];                                            \
+    }                                                                           \
+    local.count += kBatchSize * num_batch;                                      \
+    return local;                                                               \
+  }
+
+  // AVX512 override version for dense double
+  BATCH_FUNC_DENSE_DIRECT(double, _mm512_set1_pd, _mm512_loadu_pd, _mm512_add_pd)
+  // AVX512 override version for dense int64_t
+  BATCH_FUNC_DENSE_DIRECT(int64_t, _mm512_set1_epi64, _mm512_loadu_si512,
+                          _mm512_add_epi64)
+  // AVX512 override version for dense uint64_t
+  BATCH_FUNC_DENSE_DIRECT(uint64_t, _mm512_set1_epi64, _mm512_loadu_si512,
+                          _mm512_add_epi64)
+
+// Dense helper for which need a converter from data type to accumulator type
+#define BATCH_FUNC_DENSE_CVT(Type, SumType, SimdSetFn, SimdLoadFn, SimdLoadType, \
+                             SimdCvtFn, SimdAddFn)                               \
+  inline StateType SumDenseBatch(const Type* values, int64_t num_batch) const {  \
+    StateType local;                                                             \
+    const auto kBatchSize = BatchSize<Type>();                                   \
+                                                                                 \
+    auto result_simd = SimdSetFn(0);                                             \
+    for (auto i = 0; i < num_batch; i++) {                                       \
+      auto src_simd =                                                            \
+          SimdLoadFn(reinterpret_cast<SimdLoadType>(&values[i * kBatchSize]));   \
+      /* Convert to the accumulator type */                                      \
+      auto acc_simd = SimdCvtFn(src_simd);                                       \
+      /* Vectorize aggregate the result on the accumulator type*/                \
+      result_simd = SimdAddFn(acc_simd, result_simd);                            \
+    }                                                                            \
+                                                                                 \
+    /* Aggregate the final result on the vectorize results */                    \
+    auto result_scalar = reinterpret_cast<SumType*>(&result_simd);               \
+    for (auto i = 0; i < kBatchSize; i++) {                                      \
+      local.sum += result_scalar[i];                                             \
+    }                                                                            \
+    local.count += kBatchSize * num_batch;                                       \
+    return local;                                                                \
+  }
+
+  // AVX512 override version for dense float
+  BATCH_FUNC_DENSE_CVT(float, double, _mm512_set1_pd, _mm256_loadu_ps, const float*,
+                       _mm512_cvtps_pd, _mm512_add_pd)
+  // AVX512 override version for dense int32_t
+  BATCH_FUNC_DENSE_CVT(int32_t, int64_t, _mm512_set1_epi64, _mm256_loadu_si256,
+                       const __m256i*, _mm512_cvtepi32_epi64, _mm512_add_epi64)
+  // AVX512 override version for dense uint32_t
+  BATCH_FUNC_DENSE_CVT(uint32_t, uint64_t, _mm512_set1_epi64, _mm256_loadu_si256,
+                       const __m256i*, _mm512_cvtepi32_epi64, _mm512_add_epi64)
+  // AVX512 override version for dense int16_t
+  BATCH_FUNC_DENSE_CVT(int16_t, int64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                       const __m128i*, _mm512_cvtepi16_epi64, _mm512_add_epi64)
+  // AVX512 override version for dense uint16_t
+  BATCH_FUNC_DENSE_CVT(uint16_t, uint64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                       const __m128i*, _mm512_cvtepi16_epi64, _mm512_add_epi64)
+  // AVX512 override version for dense int8_t
+  BATCH_FUNC_DENSE_CVT(int8_t, int64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                       const __m128i*, _mm512_cvtepi8_epi64, _mm512_add_epi64)
+  // AVX512 override version for dense uint8_t
+  BATCH_FUNC_DENSE_CVT(uint8_t, uint64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                       const __m128i*, _mm512_cvtepi8_epi64, _mm512_add_epi64)
+
+// Sparse helper for accumulator type is same to data type
+#define BATCH_FUNC_SPARSE_DIRECT(Type, SimdSetFn, SimdLoadFn, SimdMaskAddFn)      \
+  inline StateType SumSparseBatch(const uint8_t* bitmap, const Type* values,      \
+                                  int64_t num_batch) const {                      \
+    StateType local;                                                              \
+    const auto kBatchSize = BatchSize<Type>();                                    \
+                                                                                  \
+    auto result_simd = SimdSetFn(0);                                              \
+    /* Directly mask aggregate the results with vectorize way */                  \
+    for (auto i = 0; i < num_batch; i++) {                                        \
+      auto src_simd = SimdLoadFn(&values[i * kBatchSize]);                        \
+      result_simd = SimdMaskAddFn(result_simd, bitmap[i], src_simd, result_simd); \
+      local.count += BitUtil::kBytePopcount[bitmap[i]];                           \
+    }                                                                             \
+                                                                                  \
+    /* Aggregate the final result on the vectorize results */                     \
+    auto result_scalar = reinterpret_cast<Type*>(&result_simd);                   \
+    for (auto i = 0; i < kBatchSize; i++) {                                       \
+      local.sum += result_scalar[i];                                              \
+    }                                                                             \
+    return local;                                                                 \
+  }
+
+  // AVX512 override version for sparse double
+  BATCH_FUNC_SPARSE_DIRECT(double, _mm512_set1_pd, _mm512_loadu_pd, _mm512_mask_add_pd)
+  // AVX512 override version for sparse int64_t
+  BATCH_FUNC_SPARSE_DIRECT(int64_t, _mm512_set1_epi64, _mm512_loadu_si512,
+                           _mm512_mask_add_epi64)
+  // AVX512 override version for sparse uint64_t
+  BATCH_FUNC_SPARSE_DIRECT(uint64_t, _mm512_set1_epi64, _mm512_loadu_si512,
+                           _mm512_mask_add_epi64)
+
+// Sparse helper for which need a converter from data type to accumulator type
+#define BATCH_FUNC_SPARSE_CVT(Type, SumType, SimdSetFn, SimdLoadFn, SimdLoadType, \
+                              SimdCvtFn, SimdMaskAddFn)                           \
+  inline StateType SumSparseBatch(const uint8_t* bitmap, const Type* values,      \
+                                  int64_t num_batch) const {                      \
+    StateType local;                                                              \
+    const auto kBatchSize = BatchSize<Type>();                                    \
+                                                                                  \
+    auto result_simd = SimdSetFn(0);                                              \
+    for (auto i = 0; i < num_batch; i++) {                                        \
+      auto src_simd =                                                             \
+          SimdLoadFn(reinterpret_cast<SimdLoadType>(&values[i * kBatchSize]));    \
+      /* Convert to the accumulator type */                                       \
+      auto acc_simd = SimdCvtFn(src_simd);                                        \
+      /* Mask vectorize aggregate the result on the accumulator type*/            \
+      result_simd = SimdMaskAddFn(result_simd, bitmap[i], acc_simd, result_simd); \
+      local.count += BitUtil::kBytePopcount[bitmap[i]];                           \
+    }                                                                             \
+                                                                                  \
+    /* Aggregate the final result on the vectorize results */                     \
+    auto result_scalar = reinterpret_cast<SumType*>(&result_simd);                \
+    for (auto i = 0; i < kBatchSize; i++) {                                       \
+      local.sum += result_scalar[i];                                              \
+    }                                                                             \
+    return local;                                                                 \
+  }
+
+  // AVX512 override version for sparse float
+  BATCH_FUNC_SPARSE_CVT(float, double, _mm512_set1_pd, _mm256_loadu_ps, const float*,
+                        _mm512_cvtps_pd, _mm512_mask_add_pd)
+  // AVX512 override version for sparse int32_t
+  BATCH_FUNC_SPARSE_CVT(int32_t, int64_t, _mm512_set1_epi64, _mm256_loadu_si256,
+                        const __m256i*, _mm512_cvtepi32_epi64, _mm512_mask_add_epi64)
+  // AVX512 override version for sparse uint32_t
+  BATCH_FUNC_SPARSE_CVT(uint32_t, uint64_t, _mm512_set1_epi64, _mm256_loadu_si256,
+                        const __m256i*, _mm512_cvtepi32_epi64, _mm512_mask_add_epi64)
+  // AVX512 override version for sparse int16_t
+  BATCH_FUNC_SPARSE_CVT(int16_t, int64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                        const __m128i*, _mm512_cvtepi16_epi64, _mm512_mask_add_epi64)
+  // AVX512 override version for sparse uint16_t
+  BATCH_FUNC_SPARSE_CVT(uint16_t, uint64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                        const __m128i*, _mm512_cvtepi16_epi64, _mm512_mask_add_epi64)
+  // AVX512 override version for sparse int8_t
+  BATCH_FUNC_SPARSE_CVT(int8_t, int64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                        const __m128i*, _mm512_cvtepi8_epi64, _mm512_mask_add_epi64)
+  // AVX512 override version for sparse uint8_t
+  BATCH_FUNC_SPARSE_CVT(uint8_t, uint64_t, _mm512_set1_epi64, _mm_loadu_si128,
+                        const __m128i*, _mm512_cvtepi8_epi64, _mm512_mask_add_epi64)
+#endif
 
   // Handle the sparse as byte sequence
   inline StateType SumSparseBytes(const uint8_t* bitmap, const CType* values,
