@@ -38,7 +38,7 @@ template <typename T>
 void inline ByteStreamSplitEncodeAvx512(const uint8_t* raw_values,
                                         const size_t num_values,
                                         uint8_t* output_buffer_raw) {
-  static_assert("ByteStreamSplitEncodeAvx512 not implemented");
+  static_assert(true, "ByteStreamSplitEncodeAvx512 not implemented");
 }
 
 template <>
@@ -58,7 +58,7 @@ void inline ByteStreamSplitEncodeAvx512<double>(const uint8_t* raw_values,
 template <typename T>
 void inline ByteStreamSplitDecodeAvx512(const uint8_t* data, int64_t num_values,
                                         int64_t stride, T* out) {
-  static_assert("ByteStreamSplitDecodeAvx512 not implemented");
+  static_assert(true, "ByteStreamSplitDecodeAvx512 not implemented");
 }
 
 template <>

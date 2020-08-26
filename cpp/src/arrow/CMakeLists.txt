@@ -219,8 +219,11 @@ if(CXX_SUPPORTS_SSE4_2)
   list(APPEND ARROW_SRCS util/byte_stream_split_sse4_2.cc)
   set_source_files_properties(util/byte_stream_split_sse4_2.cc PROPERTIES
                               SKIP_PRECOMPILE_HEADERS ON)
-  set_source_files_properties(util/byte_stream_split_sse4_2.cc PROPERTIES COMPILE_FLAGS
-                              ${ARROW_SSE4_2_FLAG})
+  # MSVC define ARROW_SSE4_2_FLAG to ""
+  if(ARROW_SSE4_2_FLAG)
+    set_source_files_properties(util/byte_stream_split_sse4_2.cc PROPERTIES COMPILE_FLAGS
+                                ${ARROW_SSE4_2_FLAG})
+  endif()
 endif()
 if(CXX_SUPPORTS_AVX2)
   list(APPEND ARROW_SRCS util/bpacking_avx2.cc)

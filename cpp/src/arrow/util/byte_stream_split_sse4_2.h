@@ -37,7 +37,7 @@ void ByteStreamSplitDecodeSse42Double(const uint8_t* data, int64_t num_values,
 template <typename T>
 void inline ByteStreamSplitEncodeSse42(const uint8_t* raw_values, const size_t num_values,
                                        uint8_t* output_buffer_raw) {
-  static_assert("ByteStreamSplitEncodeSse42 not implemented");
+  static_assert(true, "ByteStreamSplitEncodeSse42 not implemented");
 }
 
 template <>
@@ -57,7 +57,7 @@ void inline ByteStreamSplitEncodeSse42<double>(const uint8_t* raw_values,
 template <typename T>
 void inline ByteStreamSplitDecodeSse42(const uint8_t* data, int64_t num_values,
                                        int64_t stride, T* out) {
-  static_assert("ByteStreamSplitDecodeSse42 not implemented");
+  static_assert(true, "ByteStreamSplitDecodeSse42 not implemented");
 }
 
 template <>

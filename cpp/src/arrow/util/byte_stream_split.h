@@ -20,24 +20,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "arrow/util/visibility.h"
+
 namespace arrow {
 namespace util {
 namespace internal {
 
+ARROW_EXPORT
 void ByteStreamSplitEncodeFloat(const uint8_t* raw_values, const size_t num_values,
                                 uint8_t* output_buffer_raw);
+
+ARROW_EXPORT
 void ByteStreamSplitEncodeDouble(const uint8_t* raw_values, const size_t num_values,
                                  uint8_t* output_buffer_raw);
 
+ARROW_EXPORT
 void ByteStreamSplitDecodeFloat(const uint8_t* data, int64_t num_values, int64_t stride,
                                 float* out);
+
+ARROW_EXPORT
 void ByteStreamSplitDecodeDouble(const uint8_t* data, int64_t num_values, int64_t stride,
                                  double* out);
 
 template <typename T>
 void inline ByteStreamSplitEncode(const uint8_t* raw_values, const size_t num_values,
                                   uint8_t* output_buffer_raw) {
-  static_assert("ByteStreamSplitEncode not implemented");
+  static_assert(true, "ByteStreamSplitEncode not implemented");
 }
 
 template <>
@@ -57,7 +65,7 @@ void inline ByteStreamSplitEncode<double>(const uint8_t* raw_values,
 template <typename T>
 void inline ByteStreamSplitDecode(const uint8_t* data, int64_t num_values, int64_t stride,
                                   T* out) {
-  static_assert("ByteStreamSplitDecode not implemented");
+  static_assert(true, "ByteStreamSplitDecode not implemented");
 }
 
 template <>

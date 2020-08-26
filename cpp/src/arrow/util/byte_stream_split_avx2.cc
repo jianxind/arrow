@@ -26,6 +26,11 @@ namespace internal {
 
 namespace {
 
+#ifdef _MSC_VER
+#pragma warning(push)
+// C4789 warns about buffer overruns on the dead code of float path (kNumStreams == 4).
+#pragma warning(disable : 4789)
+#endif
 template <typename T>
 void ByteStreamSplitDecodeAvx2Internal(const uint8_t* data, int64_t num_values,
                                        int64_t stride, T* out) {
@@ -111,6 +116,9 @@ void ByteStreamSplitDecodeAvx2Internal(const uint8_t* data, int64_t num_values,
     }
   }
 }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 template <typename T>
 void ByteStreamSplitEncodeAvx2Internal(const uint8_t* raw_values, const size_t num_values,
