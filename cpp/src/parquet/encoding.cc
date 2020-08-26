@@ -2303,7 +2303,6 @@ int ByteStreamSplitDecoder<DType>::DecodeArrow(
   const uint8_t* data = data_ + num_decoded_previously;
   int offset = 0;
 
-#if defined(ARROW_HAVE_SIMD_SPLIT)
   // Use fast decoding into intermediate buffer.  This will also decode
   // some null values, but it's fast enough that we don't care.
   T* decode_out = EnsureDecodeBuffer(values_decoded);
@@ -2319,21 +2318,6 @@ int ByteStreamSplitDecoder<DType>::DecodeArrow(
         ++offset;
       },
       [&]() { builder->UnsafeAppendNull(); });
-
-#else
-  VisitNullBitmapInline(
-      valid_bits, valid_bits_offset, num_values, null_count,
-      [&]() {
-        uint8_t gathered_byte_data[kNumStreams];
-        for (size_t b = 0; b < kNumStreams; ++b) {
-          const size_t byte_index = b * num_values_in_buffer_ + offset;
-          gathered_byte_data[b] = data[byte_index];
-        }
-        builder->UnsafeAppend(arrow::util::SafeLoadAs<T>(&gathered_byte_data[0]));
-        ++offset;
-      },
-      [&]() { builder->UnsafeAppendNull(); });
-#endif
 
   num_values_ -= values_decoded;
   len_ -= sizeof(T) * values_decoded;
