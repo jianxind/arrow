@@ -181,6 +181,7 @@ set(ARROW_SRCS
     util/bitmap_builders.cc
     util/bitmap_ops.cc
     util/bpacking.cc
+    util/byte_stream_split.cc
     util/compression.cc
     util/cpu_info.cc
     util/decimal.cc
@@ -214,10 +215,23 @@ set(ARROW_SRCS
     vendored/double-conversion/diy-fp.cc
     vendored/double-conversion/strtod.cc)
 
+if(CXX_SUPPORTS_SSE4_2)
+  list(APPEND ARROW_SRCS util/byte_stream_split_sse4_2.cc)
+  set_source_files_properties(util/byte_stream_split_sse4_2.cc PROPERTIES
+                              SKIP_PRECOMPILE_HEADERS ON)
+  set_source_files_properties(util/byte_stream_split_sse4_2.cc PROPERTIES COMPILE_FLAGS
+                              ${ARROW_SSE4_2_FLAG})
+endif()
 if(CXX_SUPPORTS_AVX2)
   list(APPEND ARROW_SRCS util/bpacking_avx2.cc)
   set_source_files_properties(util/bpacking_avx2.cc PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
   set_source_files_properties(util/bpacking_avx2.cc PROPERTIES COMPILE_FLAGS
+                              ${ARROW_AVX2_FLAG})
+
+  list(APPEND ARROW_SRCS util/byte_stream_split_avx2.cc)
+  set_source_files_properties(util/byte_stream_split_avx2.cc PROPERTIES
+                              SKIP_PRECOMPILE_HEADERS ON)
+  set_source_files_properties(util/byte_stream_split_avx2.cc PROPERTIES COMPILE_FLAGS
                               ${ARROW_AVX2_FLAG})
 endif()
 if(CXX_SUPPORTS_AVX512)
@@ -225,6 +239,12 @@ if(CXX_SUPPORTS_AVX512)
   set_source_files_properties(util/bpacking_avx512.cc PROPERTIES SKIP_PRECOMPILE_HEADERS
                               ON)
   set_source_files_properties(util/bpacking_avx512.cc PROPERTIES COMPILE_FLAGS
+                              ${ARROW_AVX512_FLAG})
+
+  list(APPEND ARROW_SRCS util/byte_stream_split_avx512.cc)
+  set_source_files_properties(util/byte_stream_split_avx512.cc PROPERTIES
+                              SKIP_PRECOMPILE_HEADERS ON)
+  set_source_files_properties(util/byte_stream_split_avx512.cc PROPERTIES COMPILE_FLAGS
                               ${ARROW_AVX512_FLAG})
 endif()
 

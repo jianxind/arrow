@@ -29,9 +29,10 @@
 #else
 // gcc/clang (possibly others)
 
-#if defined(ARROW_HAVE_AVX2) || defined(ARROW_HAVE_AVX512)
+#if defined(ARROW_HAVE_AVX2) || defined(ARROW_HAVE_AVX512) || \
+    defined(ARROW_HAVE_RUNTIME_AVX2) || defined(ARROW_HAVE_RUNTIME_AVX512)
 #include <immintrin.h>
-#elif defined(ARROW_HAVE_SSE4_2)
+#elif defined(ARROW_HAVE_SSE4_2) || defined(ARROW_HAVE_RUMTIME_SSE4_2)
 #include <nmmintrin.h>
 #endif
 
