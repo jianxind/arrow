@@ -60,7 +60,7 @@ inline static const uint32_t* unpack1_32_avx512(const uint32_t* in, uint32_t* ou
                               in[0], in[0]);
   results = _mm512_and_epi32(_mm512_srlv_epi32(reg_inls, reg_shifts), reg_masks);
   _mm512_storeu_si512(out, results);
-  out += 16;
+  out += 8;
 
   // shift the second 16 outs
   reg_shifts = _mm512_set_epi32(31, 30, 29, 28,
